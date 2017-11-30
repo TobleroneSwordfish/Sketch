@@ -6,64 +6,104 @@
 
 typedef enum {DX, DY, DT, PEN} opcode;
 
-struct Vector2
+struct State
 {
-    int x, y;
+    int x;
+    int y;
+    bool write;
+    display *disp;
 };
-typedef struct Vector2 Vector2;
+typedef struct State State;
 
 opcode GetOpcode(unsigned char byte)
 {
-    //mask the first two bits
-    byte = byte & 0xC0;
-    return byte;
+    return byte >> 6;
+}
+
+int GetNthBit(unsigned char byte, int n)
+{
+    return (byte & ( 1 << n )) >> n;
+}
+
+signed char GetSigned6Bit(unsigned char byte)
+{
+    byte = byte & 0x3F;
+    int sign = GetNthBit(byte, 5);
+    return (byte & 0x1F) - - (sign * -32);
+}
+
+void MoveX(State *state, unsigned char byte)
+{
+    signed char x = GetSigned6Bit(byte);
+    printf("x: %i\n", x);
+    if (state->write)
+    {
+        line(state->disp, state->x, state->y, state->x + x, state->y);
+    }
+    state->x += x;
+}
+
+void MoveY(State *state, unsigned char byte)
+{
+    signed char y = GetSigned6Bit(byte);
+    printf("y: %i\n", y);
+    if (state->write)
+    {
+        line(state->disp, state->x, state->y, state->x, state->y + y);
+    }
+    state->y += y;
+}
+
+void Wait(State *state, unsigned char byte)
+{
+    unsigned char t = byte & 0x3F;
+    printf("t: %i\n", t);
+    pause(state->disp, t);
+}
+
+void ToggleWrite(State *state)
+{
+    state->write = !state->write;
 }
 
 int main (int n, char *args[n])
 {
-    //last position moved to
-    Vector2 last = {0, 0};
-    //is the pen writing
-    bool write = false;
     //initialize display
     display *disp = newDisplay("Sketch", width, height);
+    State state = {0,0, false, disp};
     //start the read
     FILE *in = fopen(args[1], "rb");
-    unsigned char byte = fgetch(in);
+    unsigned char byte = fgetc(in);
+    //printf("DX: %i, DY: %i, DT: %i, PEN: %i\n", DX, DY, DT, PEN);
     while (! feof(in))
     {
+        printf("Byte read in: %i\n", byte);
+        printf("Opcode: %i\n", GetOpcode(byte));
         switch (GetOpcode(byte))
         {
             case DX:
             {
-                //mask the last 6 bits, and convert to signed
-                signed char x = byte & 0x3F;
-                if (write)
-                {
-                    line(disp, last.x, last.y, last.x + x, last.y);
-                }
-                last.x = x;
+                MoveX(&state, byte);
+                break;
             }
             case DY:
             {
-                //mask the last 6 bits, and convert to signed
-                signed char y = byte & 0x3F;
-                if (write)
-                {
-                    line(disp ,last.x, last.y, last.x, last.y + y);
-                }
-                last.y = y;
+                MoveY(&state, byte);
+                break;
             }
             case DT:
             {
-                unsigned char t = byte & 0x3F;
-                pause(disp, t);
+                Wait(&state, byte);
+                break;
             }
             case PEN:
             {
-                write = !write;
+                ToggleWrite(&state);
+                break;
             }
         }
-        byte = fgetch(in);
+        byte = fgetc(in);
     }
+    key(disp);
+    //end(disp);
 }
