@@ -24,13 +24,13 @@ struct State
 };
 typedef struct State State;
 
-void Initialize(State *state)
+void Initialize(State *state, char* windowName)
 {
     state->last.x = 0;
     state->last.y = 0;
     state->current = state->last;
     state->write = false;
-    state->disp = newDisplay("Sketch", width, height);
+    state->disp = newDisplay(windowName, width, height);
 }
 
 //returns the 2 bit opcode from the start of a byte as an enum
@@ -116,6 +116,7 @@ void MoveY(State *state, int y)
 
 void Wait(State *state, int ms)
 {
+    ms *= 10;
     printf("waiting for %ims\n", ms);
     pause(state->disp, ms);
 }
@@ -206,8 +207,8 @@ void DisplayFile(char *filename)
 {
     //initialize display
     State state;
-    Initialize(&state);
-    colour(state.disp, 0x00FF00FF);
+    Initialize(&state, filename);
+    //colour(state.disp, 0x00FF00FF);
     //start the read
     FILE *in = fopen(filename, "rb");
     unsigned char byte = fgetc(in);
@@ -265,7 +266,8 @@ void DisplayFile(char *filename)
         }
         byte = fgetc(in);
     }
-    key(state.disp);
+    //key(state.disp);
+    end(state.disp);
 }
 
 int main (int n, char *args[n])
