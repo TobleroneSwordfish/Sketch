@@ -68,65 +68,87 @@ signed char GetSigned6Bit(unsigned char byte)
     return (byte & 0x1F) + (sign * -32);
 }
 
+//converts the positive representation of a given length (in bits) integer into two's complement binary
+//if the number would be positive anyway, then it is simply returned
 int ToTwosComplement(int positive, int length)
 {
+    //check if the number is actually negative
     if (GetNthBit(positive, length - 1) == 1)
     {
+        //build a mask of all bits up to the MSB (negative bit)
         int mask = 0;
         for (int i = 0; i < length - 1; i++)
         {
             mask <<= 1;
             mask |= 0x1;
         }
-        printf("Mask: %x\n", mask);
+        //printf("Mask: %x\n", mask);
+        //apply the mask to get the positive part
         int plus = positive & mask;
-        printf("Positive part: %i\n", plus);
+        //printf("Positive part: %i\n", plus);
+        //weight the MSB correctly and negate it
         int minus = -(pow(2, length - 1));
-        printf("Negative part: %i\n", minus);
+        //printf("Negative part: %i\n", minus);
         return (minus + plus);
     }
+    //default to just returning the number
     return positive;
+}
+
+//reads n bytes from a file and treats them as an integer
+int ReadNBytes(FILE *in, int n)
+{
+    int output = 0;
+    for (int i = 0; i < n; i++)
+    {
+        //shift the current number along 8 bits
+        output <<= 8;
+        //insert the next byte
+        unsigned char nextByte = fgetc(in);
+        //printf("EXT byte read in: %x\n", nextByte);
+        output |= nextByte;
+    }
+    return output;
 }
 
 void MoveX(State *state, int x)
 {
-    printf("x current changed from %i to %i\n", state->current.x, state->current.x + x);
-    // if (state->write)
-    // {
-    //     printf(" with pen down");
-    //     line(state->disp, state->x, state->y, state->x + x, state->y);
-    // }
+    //printf("x current changed from %i to %i\n", state->current.x, state->current.x + x);
     state->current.x += x;
-    //printf(" to %i\n", state->x);
 }
 
 void MoveY(State *state, int y)
 {
-    printf("y current changed from %i to %i\n", state->current.y, state->current.y + y);
+    //printf("y current changed from %i to %i\n", state->current.y, state->current.y + y);
     state->current.y += y;
     if (state->write)
     {
-        printf("Line drawn from %i,%i to %i,%i\n", state->last.x, state->last.y, state->current.x, state->current.y);
+        //printf("Line drawn from %i,%i to %i,%i\n", state->last.x, state->last.y, state->current.x, state->current.y);
         line(state->disp, state->last.x, state->last.y, state->current.x, state->current.y);
     }
-    printf("Last position changed from %i,%i to %i,%i\n", state->last.x, state->last.y, state->current.x, state->current.y);
+    //printf("Last position changed from %i,%i to %i,%i\n", state->last.x, state->last.y, state->current.x, state->current.y);
     state->last.x = state->current.x;
     state->last.y = state->current.y;
 }
 
-void Wait(State *state, int ms)
+//this ought to take a time in ms, but seems to instead take a time in cs?
+//anyways, this only passes the tests if it's 10 times longer than the value in the file
+//don't ask me why, blame Ian
+void Wait(State *state, int time)
 {
-    ms *= 10;
-    printf("waiting for %ims\n", ms);
-    pause(state->disp, ms);
+    time *= 10;
+    printf("waiting for %ims\n", time);
+    pause(state->disp, time);
 }
 
+//think about what the word toggle means...
 void ToggleWrite(State *state)
 {
     state->write = !state->write;
-    printf(state->write ? "Pen down\n" : "Pen up\n");
+    //printf(state->write ? "Pen down\n" : "Pen up\n");
 }
 
+//runs an operation from extended format, or non-extended where EXT is interpreted as PEN
 void RunOperation(State *state, extOpcode code, int operand)
 {
     switch(code)
@@ -150,10 +172,28 @@ void RunOperation(State *state, extOpcode code, int operand)
             key(state->disp);
             break;
         case COL:
-            printf("Setting colour to %x\n", operand);
+            //printf("Setting colour to %x\n", operand);
             colour(state->disp, operand);
             break;
     }
+}
+
+//handle the EXT opcode
+void ReadExtendedOperation(State *state, unsigned char currentByte, FILE *in)
+{
+    //next two bits are the extra number of bytes the extension takes up
+    //we mask out the EXT opcode, then shift right by 4 to nuke the next extended opcode
+    unsigned char length = GetNextPwr2((currentByte & 0x30) >> 4);
+    printf("Length of operand: %i\n", length);
+    //last four bits are the extended opcode
+    opcode nextOp = currentByte & 0x0F;
+    //the multi-byte operand
+    int operand = ReadNBytes(in, length);
+    printf("Initial EXT operand: %i\n", operand);
+    //ensure that the number is treated as two's complement
+    operand = ToTwosComplement(operand, length * 8);
+    printf("Fixed EXT operand: %i\n", operand);
+    RunOperation(state, nextOp, operand);
 }
 
 //testing
@@ -194,6 +234,7 @@ void TestTwosComplement()
     assert(ToTwosComplement(0xFF74, 16) == -140);
 }
 
+//some basic testing
 void RunTests()
 {
     TestGetOpcode();
@@ -208,11 +249,9 @@ void DisplayFile(char *filename)
     //initialize display
     State state;
     Initialize(&state, filename);
-    //colour(state.disp, 0x00FF00FF);
     //start the read
     FILE *in = fopen(filename, "rb");
     unsigned char byte = fgetc(in);
-    //printf("DX: %i, DY: %i, DT: %i, PEN: %i\n", DX, DY, DT, PEN);
     while (! feof(in))
     {
         //printf("Byte read in: %i\n", byte);
@@ -234,33 +273,9 @@ void DisplayFile(char *filename)
                 Wait(&state, byte & 0x3F);
                 break;
             }
-            // case PEN:
-            // {
-            //     ToggleWrite(&state);
-            //     break;
-            // }
             case EXT:
             {
-                //next two bits are the extra number of bytes the extension takes up
-                unsigned char length = GetNextPwr2((byte & 0x30) >> 4);
-                printf("Length of operand: %i\n", length);
-                //last four bits are the extended opcode
-                opcode nextOp = byte & 0x0F;
-                //the multi-byte operand
-                int operand = 0;
-                for (int i = 0; i < length; i++)
-                {
-                    //shift the current number along 8 bits
-                    operand <<= 8;
-                    //insert the next byte
-                    unsigned char nextByte = fgetc(in);
-                    printf("EXT byte read in: %x\n", nextByte);
-                    operand |= nextByte;
-                }
-                printf("Initial EXT operand: %i\n", operand);
-                operand = ToTwosComplement(operand, length * 8);
-                printf("Fixed EXT operand: %i\n", operand);
-                RunOperation(&state, nextOp, operand);
+                ReadExtendedOperation(&state, byte, in);
                 break;
             }
         }
